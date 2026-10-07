@@ -1,0 +1,333 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>企业邮件 E2EE 策略网关</title>
+<style>
+  :root { --bg:#0f1420; --panel:#171e2e; --line:#2a3550; --fg:#e6ebf5;
+          --mut:#8b97ad; --ok:#35c46e; --bad:#ff5d5d; --warn:#f0b429;
+          --acc:#4d8dff; --chip:#222c42; }
+  * { box-sizing:border-box; }
+  body { margin:0; font:14px/1.55 -apple-system,"Segoe UI",Roboto,"PingFang SC","Microsoft YaHei",sans-serif;
+         background:var(--bg); color:var(--fg); }
+  header { padding:18px 28px; border-bottom:1px solid var(--line); display:flex; align-items:baseline; gap:16px;}
+  header h1 { font-size:18px; margin:0; }
+  header .sub { color:var(--mut); font-size:12px; }
+  nav { display:flex; gap:4px; padding:0 28px; border-bottom:1px solid var(--line); background:var(--panel); }
+  nav button { background:none; border:0; color:var(--mut); padding:14px 18px; cursor:pointer; font-size:14px; border-bottom:2px solid transparent;}
+  nav button.active { color:var(--fg); border-bottom-color:var(--acc); }
+  main { padding:24px 28px; max-width:1080px; }
+  .tab { display:none; } .tab.active { display:block; }
+  .grid { display:grid; grid-template-columns:1fr 1fr; gap:16px; }
+  .card { background:var(--panel); border:1px solid var(--line); border-radius:10px; padding:16px 18px; margin-bottom:16px;}
+  .card h2 { font-size:14px; margin:0 0 12px; }
+  label { display:block; font-size:12px; color:var(--mut); margin:10px 0 4px; }
+  input, textarea, select { width:100%; background:#0d1322; border:1px solid var(--line); color:var(--fg);
+        border-radius:6px; padding:8px 10px; font:inherit; }
+  textarea { min-height:70px; resize:vertical; font-family:ui-monospace,Menlo,Consolas,monospace; font-size:12px;}
+  button.act { background:var(--acc); color:#fff; border:0; border-radius:6px; padding:9px 18px; cursor:pointer; margin-top:12px; font-weight:600;}
+  button.sec { background:var(--chip); color:var(--fg); border:1px solid var(--line); border-radius:6px; padding:7px 14px; cursor:pointer; margin-top:10px;}
+  .row { display:flex; gap:10px; align-items:center; }
+  table { width:100%; border-collapse:collapse; font-size:12.5px; }
+  th, td { text-align:left; padding:7px 9px; border-bottom:1px solid var(--line); vertical-align:top; }
+  th { color:var(--mut); font-weight:600; }
+  .chip { display:inline-block; padding:1px 8px; border-radius:99px; font-size:11.5px; font-weight:600; background:var(--chip); }
+  .trusted { color:var(--ok); } .blocked, .BAD, .revoked { color:var(--bad); }
+  .acked { color:var(--warn); } .sent { color:var(--acc); }
+  .banner { padding:10px 14px; border-radius:8px; margin-bottom:12px; font-weight:600; }
+  .banner.ok { background:rgba(53,196,110,.12); color:var(--ok); border:1px solid rgba(53,196,110,.35);}
+  .banner.bad { background:rgba(255,93,93,.12); color:var(--bad); border:1px solid rgba(255,93,93,.35);}
+  .banner.warn { background:rgba(240,180,41,.12); color:var(--warn); border:1px solid rgba(240,180,41,.35);}
+  pre { background:#0d1322; border:1px solid var(--line); border-radius:8px; padding:12px; overflow:auto;
+        font-size:12px; max-height:430px; }
+  .mut { color:var(--mut); font-size:12px; }
+  code { background:var(--chip); padding:1px 5px; border-radius:4px; font-size:12px;}
+</style>
+</head>
+<body>
+<header>
+  <h1>企业邮件端到端加密策略网关</h1>
+  <span class="sub">密钥快照冻结 · 强制加密 fail-closed · 可验证投递清单</span>
+</header>
+<nav>
+  <button data-tab="precheck" class="active">① 发送预检</button>
+  <button data-tab="mail">② 邮件生命周期</button>
+  <button data-tab="manifest">③ 投递清单验证</button>
+  <button data-tab="admin">④ 管理面 / 轮换撤销演练</button>
+</nav>
+<main>
+  <!-- ===================== 预检 ===================== -->
+  <section id="precheck" class="tab active">
+    <div class="card">
+      <h2>发送预检（不写入、不发送）</h2>
+      <label>收件人列表 JSON</label>
+      <textarea id="pc_recipients">[
+  {"email": "alice@corp.example"},
+  {"email": "bob@partner.example"},
+  {"email": "carol@partner.example", "cleartext_ack": true}
+]</textarea>
+      <label class="mut">字段：<code>email</code> 必填；<code>mode</code> 可覆盖为 ENFORCE/OPPORTUNISTIC；
+        <code>cleartext_ack:true</code> 表示发件人对该地址显式确认明文（仅机会加密域密钥缺失时生效）。</label>
+      <div class="row">
+        <label style="flex:1">时间点（Unix 秒，留空=当前）<input id="pc_at" placeholder="留空使用服务器当前时间"></label>
+        <button class="act" onclick="precheck()">执行预检</button>
+      </div>
+    </div>
+    <div id="pc_result"></div>
+  </section>
+
+  <!-- ===================== 邮件 ===================== -->
+  <section id="mail" class="tab">
+    <div class="card">
+      <h2>创建邮件 → 冻结快照 → 发送</h2>
+      <div class="grid">
+        <div>
+          <label>发件人（必须为托管身份）<input id="m_sender" value="alice@corp.example"></label>
+          <label>主题 <input id="m_subject" value="季度机密财报"></label>
+          <label>幂等键（可选）<input id="m_idem" placeholder="如 quote-2026-007"></label>
+        </div>
+        <div>
+          <label>正文 <textarea id="m_body">Q4 营收数据：机密，请勿转发。</textarea></label>
+          <label>显式确认明文的地址（逗号分隔）<input id="m_ack" placeholder="carol@partner.example"></label>
+        </div>
+      </div>
+      <button class="act" onclick="createMail()">1. 创建邮件</button>
+    </div>
+    <div class="card">
+      <h2>冻结收件人集合 / 发送</h2>
+      <div class="row">
+        <label style="flex:1">邮件 ID <input id="m_id" placeholder="创建后自动填入"></label>
+        <button class="sec" onclick="loadMail()">载入</button>
+      </div>
+      <label>冻结收件人 JSON</label>
+      <textarea id="m_recipients"></textarea>
+      <div class="row">
+        <button class="act" onclick="freezeMail()">2. 冻结完整密钥快照</button>
+        <button class="sec" onclick="sendMail()">3. 发送（重试复用同一快照）</button>
+        <button class="sec" onclick="resubmit()">阻断后重新提交</button>
+      </div>
+    </div>
+    <div id="m_result"></div>
+    <div class="card">
+      <h2>最近邮件</h2>
+      <div id="m_list"></div>
+    </div>
+  </section>
+
+  <!-- ===================== 清单 ===================== -->
+  <section id="manifest" class="tab">
+    <div class="card">
+      <h2>可验证投递清单</h2>
+      <div class="row">
+        <label style="flex:1">邮件 ID <input id="mf_id"></label>
+        <button class="act" onclick="loadManifest()">生成并验证清单</button>
+        <button class="sec" onclick="verifyAudit()">验证审计哈希链</button>
+      </div>
+    </div>
+    <div id="mf_banner"></div>
+    <div class="card">
+      <h2>自动检查项</h2>
+      <div id="mf_checks"></div>
+    </div>
+    <div class="card">
+      <h2>清单详情</h2>
+      <pre id="mf_json"></pre>
+    </div>
+  </section>
+
+  <!-- ===================== 管理面 ===================== -->
+  <section id="admin" class="tab">
+    <div class="grid">
+      <div class="card">
+        <h2>CA / 域信任 / 域策略</h2>
+        <label>创建企业根 CA <input id="a_ca" placeholder="corp-root"></label>
+        <button class="act" onclick="api('POST','/api/cas',{ca_id:val('a_ca')},renderCAs)">创建 CA</button>
+        <hr style="border-color:var(--line)">
+        <label>域 <input id="a_domain" value="corp.example"></label>
+        <label>信任 CA <input id="a_trustca" placeholder="corp-root"></label>
+        <button class="sec" onclick="api('PUT','/api/domains/'+encodeURIComponent(val('a_domain'))+'/trust',{domain:val('a_domain'),ca_id:val('a_trustca')},renderCAs)">设置域信任</button>
+        <label>策略模式
+          <select id="a_mode"><option value="ENFORCE">ENFORCE（强制加密）</option><option value="OPPORTUNISTIC">OPPORTUNISTIC（机会加密+显式确认）</option></select>
+        </label>
+        <button class="sec" onclick="api('PUT','/api/domains/'+encodeURIComponent(val('a_domain'))+'/policy',{domain:val('a_domain'),mode:val('a_mode')},show('a_out'))">设置域策略</button>
+      </div>
+      <div class="card">
+        <h2>身份与证书</h2>
+        <label>邮箱 <input id="a_email" value="alice@corp.example"></label>
+        <label>签发 CA <input id="a_issuca" placeholder="corp-root"></label>
+        <label>有效期秒（默认 90 天） <input id="a_ttl" placeholder="7776000"></label>
+        <button class="act" onclick="issueIdentity(false)">签发托管身份</button>
+        <button class="sec" onclick="issueIdentity(true)">轮换证书（新密钥，旧证 superseded）</button>
+        <hr style="border-color:var(--line)">
+        <label>证书序列号（撤销用） <input id="a_serial"></label>
+        <button class="sec" onclick="revokeCert()">撤销证书（CRL 演练）</button>
+        <label>从通讯录下架邮箱（逗号分隔） <input id="a_remove" placeholder=""></label>
+        <button class="sec" onclick="directoryUpdate()">更新通讯录（下架）</button>
+      </div>
+    </div>
+    <div class="card">
+      <h2>CA 与信任现状 / 证书目录</h2>
+      <div id="a_cas"></div>
+      <div class="row" style="margin-top:8px">
+        <button class="sec" onclick="renderCAs()">刷新 CA</button>
+        <button class="sec" onclick="renderCerts()">刷新证书</button>
+      </div>
+      <div id="a_out" style="margin-top:10px"></div>
+    </div>
+  </section>
+</main>
+
+<script>
+const $ = id => document.getElementById(id);
+const val = id => $(id).value.trim();
+function esc(s){ return String(s??'').replace(/[&<>"]/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c])); }
+async function api(method, url, body, cb){
+  try {
+    const r = await fetch(url, {method, headers:{'Content-Type':'application/json'},
+      body: body?JSON.stringify(body):undefined});
+    const data = await r.json().catch(()=>({}));
+    if(!r.ok){ const e = new Error(data.error||r.statusText); e.data=data; throw e; }
+    if(cb) cb(data);
+    return data;
+  } catch(e){
+    const d = e.data ? JSON.stringify(e.data,null,2) : e.message;
+    alert('请求失败: '+d);
+  }
+}
+function banner(el, kind, text){ el.innerHTML = `<div class="banner ${kind}">${esc(text)}</div>`; }
+function show(id){ return d => $(id).innerHTML = '<pre>'+esc(JSON.stringify(d,null,2))+'</pre>'; }
+function stateChip(s){
+  const cls = s==='TRUSTED'?'trusted': s==='CLEARTEXT_ACKED'?'acked':
+              s==='SENT'?'sent':'blocked';
+  return `<span class="chip ${cls}">${esc(s)}</span>`;
+}
+function recipientTable(rs){
+  return `<table><thead><tr><th>收件人</th><th>域</th><th>模式</th><th>状态</th><th>证书摘要</th><th>原因</th></tr></thead><tbody>`+
+  rs.map(r=>`<tr><td>${esc(r.email)}</td><td>${esc(r.domain)}</td><td>${esc(r.mode)}</td>
+    <td>${stateChip(r.state)}</td>
+    <td title="${esc(r.cert_serial||'')}"><code>${esc((r.cert_fp||'').slice(0,16))}</code></td>
+    <td class="mut">${esc(r.reason||'')}</td></tr>`).join('')+
+  `</tbody></table>`;
+}
+
+// ---------- 预检
+async function precheck(){
+  let rs; try { rs = JSON.parse($('pc_recipients').value); } catch(e){ return alert('JSON 解析失败'); }
+  const at = val('pc_at') ? Number(val('pc_at')) : null;
+  const d = await api('POST','/api/precheck',{recipients:rs, at});
+  if(!d) return;
+  banner($('pc_result'), d.allowed?'ok':'bad',
+    d.allowed ? `✓ 预检通过：全部强制收件人可信，可冻结发送（目录版本 ${d.catalog_version}）`
+              : `✗ 预检阻断：${d.blocked.length} 个收件人不满足强制策略，密钥缺失不会静默降级`);
+  $('pc_result').innerHTML += `<div class="card"><h2>解析结果（可信 ${d.trusted_count} · 明文确认 ${d.cleartext_ack_count} · 阻断 ${d.blocked.length}）</h2>${recipientTable(d.recipients)}</div>`;
+}
+
+// ---------- 邮件
+let created = null;
+async function createMail(){
+  const body = {sender:val('m_sender'), subject:val('m_subject'), body:$('m_body').value,
+    cleartext_ack: val('m_ack')?val('m_ack').split(',').map(s=>s.trim()):[],
+    idempotency_key: val('m_idem')||null};
+  const d = await api('POST','/api/mails',body);
+  if(!d) return;
+  created = d; $('m_id').value = d.id;
+  if(!$('m_recipients').value.trim()){
+    $('m_recipients').value = JSON.stringify(
+      $('pc_recipients').value.trim() ? JSON.parse($('pc_recipients').value)
+      : [{email:'alice@corp.example'}], null, 2);
+  }
+  banner($('m_result'),'warn',`已创建邮件 ${d.id}（DRAFT），尚未冻结快照`);
+  listMails();
+}
+function loadMail(){ listMails(); }
+async function freezeMail(){
+  let rs; try { rs = JSON.parse($('m_recipients').value); } catch(e){ return alert('JSON 解析失败'); }
+  const d = await api('POST',`/api/mails/${val('m_id')}/freeze`,{recipients:rs});
+  if(!d) return;
+  banner($('m_result'), d.status==='READY'?'ok':'bad',
+    d.status==='READY' ? `✓ 快照已冻结：${d.snapshot_digest.slice(0,24)}… @目录版本 ${d.catalog_version}，状态 READY`
+                       : `✗ 冻结完成但被策略阻断（BLOCKED）：${d.block_reason}`);
+  $('m_result').innerHTML += `<div class="card">${recipientTable(d.recipients)}</div>`;
+  listMails();
+}
+async function sendMail(){
+  const r = await fetch(`/api/mails/${val('m_id')}/send`,{method:'POST'});
+  const d = await r.json();
+  if(r.status===423){ banner($('m_result'),'bad',`✗ 投递被禁止（HTTP 423）：${d.block_reason}`); }
+  else if(r.status===503){ banner($('m_result'),'warn',`传输瞬时失败，可用同一快照重试：${d.last_error}`); }
+  else if(r.ok){ banner($('m_result'),'ok',`✓ 已投递（SENT）回执 ${d.spool_receipt}，快照 ${d.snapshot_digest.slice(0,16)}…`); $('mf_id').value=d.id; }
+  else { banner($('m_result'),'bad',`失败：${d.error}`); }
+  listMails();
+}
+async function resubmit(){
+  const d = await api('POST',`/api/mails/${val('m_id')}/resubmit`);
+  if(d){ $('m_id').value=d.id; banner($('m_result'),'warn',`已生成新邮件 ${d.id}，可对其冻结新快照`); listMails(); }
+}
+async function listMails(){
+  const d = await api('GET','/api/mails');
+  if(!d) return;
+  $('m_list').innerHTML = `<table><thead><tr><th>ID</th><th>发件人</th><th>状态</th><th>快照摘要</th><th>回执</th><th></th></tr></thead><tbody>`+
+  d.mails.map(m=>`<tr><td><code>${m.id}</code></td><td>${esc(m.sender)}</td><td>${stateChip(m.status)}</td>
+    <td><code>${esc((m.snapshot_digest||'').slice(0,12))}</code></td><td>${esc(m.spool_receipt||'')}</td>
+    <td><button class="sec" onclick="pick('${m.id}')">选择</button></td></tr>`).join('')+`</tbody></table>`;
+}
+function pick(id){ $('m_id').value=id; $('mf_id').value=id; }
+
+// ---------- 清单
+async function loadManifest(){
+  const d = await api('GET',`/api/mails/${val('mf_id')}/manifest?verify=true`);
+  if(!d) return;
+  const v = d.verification||{};
+  const ok = v.overall_valid === true;
+  banner($('mf_banner'), ok?'ok':'bad',
+    ok ? `✓ 清单验证通过：${d.mail_id} 状态 ${d.status}，快照与投递内容完整一致`
+       : `✗ 清单验证未通过：存在失败检查项（详见下方）`);
+  const rows = Object.entries(v).filter(([k])=>!['decryption_check','audit_chain'].includes(k))
+    .map(([k,x])=>`<tr><td>${esc(k)}</td><td>${x===true?'<span class="trusted">通过</span>':x===false?'<span class="blocked">失败</span>:esc(JSON.stringify(x))}</td></tr>`).join('');
+  $('mf_checks').innerHTML = `<table><thead><tr><th>检查项</th><th>结果</th></tr></thead><tbody>${rows}</tbody></table>`+
+  (v.decryption_check?`<label>逐收件人解封与正文比对</label><pre>${esc(JSON.stringify(v.decryption_check,null,2))}</pre>`:'')+
+  (v.audit_chain?`<label>审计哈希链</label><pre>${esc(JSON.stringify(v.audit_chain,null,2))}</pre>`:'')+
+  `<label>收件人冻结集合</label>${recipientTable(d.recipients)}`;
+  $('mf_json').textContent = JSON.stringify(d,null,2);
+}
+async function verifyAudit(){
+  const d = await api('GET','/api/audit/verify');
+  if(d) alert(d.ok?`审计链完整：${d.entries} 条记录\n链头 ${d.head}`:`审计链在第 ${d.broken_at} 条被破坏！`);
+}
+
+// ---------- 管理面
+async function issueIdentity(rotate){
+  const ttl = val('a_ttl')?Number(val('a_ttl')):7776000;
+  const url = rotate?'/api/identities/rotate':'/api/identities';
+  const d = await api('POST',url,{email:val('a_email'),ca_id:val('a_issuca'),ttl_seconds:ttl},renderCerts);
+  if(d && d.certificate) $('a_serial').value = d.certificate.serial;
+}
+function revokeCert(){ api('POST','/api/certificates/revoke',{serial:val('a_serial')},()=>{renderCerts();}); }
+function directoryUpdate(){
+  const remove = val('a_remove')?val('a_remove').split(',').map(s=>s.trim()):[];
+  api('POST','/api/directory/update',{remove},renderCerts);
+}
+async function renderCAs(){
+  const cas = await api('GET','/api/cas');
+  if(cas) $('a_cas').innerHTML = cas.cas.map(c=>`<div><span class="chip">${esc(c.id)}</span> <code>${esc(c.fingerprint.slice(0,20))}</code></div>`).join('')||'<span class="mut">尚无 CA</span>';
+}
+async function renderCerts(){
+  const d = await api('GET','/api/certificates');
+  if(!d) return;
+  $('a_out').innerHTML = `<table><thead><tr><th>序列号</th><th>邮箱</th><th>CA</th><th>有效期</th><th>轮换/撤销</th></tr></thead><tbody>`+
+  d.certificates.map(c=>`<tr><td><code>${esc(c.serial.slice(0,34))}</code></td><td>${esc(c.email)}</td><td>${esc(c.ca_id)}</td>
+    <td class="mut">${new Date(c.not_before*1000).toLocaleString()}<br>→ ${new Date(c.not_after*1000).toLocaleString()}</td>
+    <td>${c.superseded_at?'<span class="chip acked">superseded</span>':''} ${c.revoked_at?'<span class="chip blocked">revoked</span>':''}</td></tr>`).join('')+`</tbody></table>`;
+}
+
+// tabs
+document.querySelectorAll('nav button').forEach(b=>b.onclick=()=>{
+  document.querySelectorAll('nav button').forEach(x=>x.classList.remove('active'));
+  document.querySelectorAll('.tab').forEach(x=>x.classList.remove('active'));
+  b.classList.add('active'); $(b.dataset.tab).classList.add('active');
+});
+listMails(); renderCAs(); renderCerts();
+</script>
+</body>
+</html>
