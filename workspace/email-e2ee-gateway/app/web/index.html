@@ -1,0 +1,573 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>企业邮件端到端加密策略网关</title>
+<style>
+  :root {
+    --bg:#0f1420; --panel:#171e2e; --panel2:#1e2740; --line:#2b3550;
+    --text:#e6ebf5; --muted:#8d99b5; --ok:#2ecc71; --warn:#f39c12;
+    --err:#e74c3c; --info:#3498db; --accent:#5b8cff;
+  }
+  * { box-sizing:border-box; }
+  body { margin:0; font-family:-apple-system,"Segoe UI","PingFang SC",
+    "Microsoft YaHei",sans-serif; background:var(--bg); color:var(--text); }
+  header { padding:16px 24px; border-bottom:1px solid var(--line);
+    display:flex; align-items:center; gap:16px; flex-wrap:wrap; }
+  header h1 { font-size:18px; margin:0; }
+  header .sub { color:var(--muted); font-size:13px; }
+  .clock { margin-left:auto; font-size:12px; color:var(--muted);
+    text-align:right; }
+  nav { display:flex; gap:4px; padding:0 24px; background:var(--panel);
+    border-bottom:1px solid var(--line); }
+  nav button { background:none; border:0; color:var(--muted);
+    padding:14px 18px; font-size:14px; cursor:pointer; border-bottom:2px solid
+    transparent; }
+  nav button.active { color:var(--text); border-bottom-color:var(--accent); }
+  main { padding:24px; max-width:1100px; margin:0 auto; }
+  .tab { display:none; } .tab.active { display:block; }
+  .card { background:var(--panel); border:1px solid var(--line);
+    border-radius:10px; padding:18px 20px; margin-bottom:16px; }
+  .card h2 { margin:0 0 12px; font-size:15px; }
+  label { display:block; font-size:12px; color:var(--muted);
+    margin:10px 0 4px; }
+  input,textarea,select { width:100%; background:var(--panel2);
+    border:1px solid var(--line); color:var(--text); border-radius:6px;
+    padding:9px 11px; font-size:13px; font-family:inherit; }
+  textarea { min-height:70px; resize:vertical; }
+  button.btn { background:var(--accent); border:0; color:#fff;
+    padding:9px 18px; border-radius:6px; font-size:13px; cursor:pointer;
+    margin-top:12px; }
+  button.btn.secondary { background:var(--panel2); border:1px solid var(--line);
+    color:var(--text); }
+  button.btn.danger { background:var(--err); }
+  button.btn:disabled { opacity:.5; cursor:not-allowed; }
+  .row { display:flex; gap:12px; flex-wrap:wrap; }
+  .row > div { flex:1; min-width:200px; }
+  table { width:100%; border-collapse:collapse; font-size:13px; }
+  th,td { text-align:left; padding:8px 10px; border-bottom:1px solid var(--line);
+    vertical-align:top; }
+  th { color:var(--muted); font-weight:500; font-size:12px; }
+  code,.mono { font-family:ui-monospace,Menlo,Consolas,monospace; font-size:12px;
+    word-break:break-all; }
+  .pill { display:inline-block; padding:2px 8px; border-radius:99px;
+    font-size:11px; font-weight:600; }
+  .pill.ok { background:rgba(46,204,113,.15); color:var(--ok); }
+  .pill.warn { background:rgba(243,156,18,.15); color:var(--warn); }
+  .pill.err { background:rgba(231,76,60,.15); color:var(--err); }
+  .pill.info { background:rgba(52,152,219,.15); color:var(--info); }
+  .banner { border-radius:8px; padding:12px 14px; margin:12px 0; font-size:13px;
+    border:1px solid; }
+  .banner.ok { border-color:var(--ok); background:rgba(46,204,113,.08); }
+  .banner.err { border-color:var(--err); background:rgba(231,76,60,.08); }
+  .banner.warn { border-color:var(--warn); background:rgba(243,156,18,.08); }
+  .banner.info { border-color:var(--info); background:rgba(52,152,219,.08); }
+  pre.json { background:#0b0f1a; border:1px solid var(--line); border-radius:8px;
+    padding:12px; overflow:auto; font-size:12px; max-height:420px; }
+  .muted { color:var(--muted); font-size:12px; }
+  .step { display:flex; gap:8px; align-items:center; font-size:13px;
+    color:var(--muted); margin-bottom:14px; }
+  .step b { color:var(--text); }
+  .step .n { width:22px; height:22px; border-radius:50%; background:var(--panel2);
+    border:1px solid var(--line); display:inline-flex; align-items:center;
+    justify-content:center; font-size:12px; }
+  .step .n.done { background:var(--accent); border-color:var(--accent); color:#fff; }
+  .ackbox { display:flex; align-items:center; gap:8px; font-size:13px; }
+  .ackbox input { width:auto; }
+  .toast { position:fixed; right:20px; bottom:20px; max-width:380px;
+    z-index:99; display:flex; flex-direction:column; gap:8px; }
+  .toast div { padding:10px 14px; border-radius:8px; font-size:13px;
+    background:var(--panel2); border:1px solid var(--line); }
+  .toast .e { border-color:var(--err); } .toast .s { border-color:var(--ok); }
+  .hidden { display:none !important; }
+</style>
+</head>
+<body>
+<header>
+  <h1>🔐 企业邮件端到端加密策略网关</h1>
+  <span class="sub">密钥快照 · 失败关闭 · 可验证投递清单</span>
+  <div class="clock" id="clock">时钟加载中…</div>
+</header>
+<nav>
+  <button data-tab="send" class="active">① 发送预检与投递</button>
+  <button data-tab="dir">② 通讯录与证书</button>
+  <button data-tab="pol">③ 加密策略</button>
+  <button data-tab="man">④ 投递清单验证</button>
+</nav>
+<main>
+
+<!-- ============================ 发送 ============================ -->
+<section class="tab active" id="tab-send">
+  <div class="card">
+    <div class="step">
+      <span class="n done">1</span><b>撰写邮件</b> →
+      <span class="n" id="s2">2</span><b>预检冻结密钥快照</b> →
+      <span class="n" id="s3">3</span><b>按快照加密投递</b> →
+      <span class="n" id="s4">4</span><b>验证签名清单</b>
+    </div>
+    <div class="row">
+      <div><label>发件人</label><input id="sender" value="alice@corp.example"></div>
+      <div><label>邮件 ID（业务幂等键）</label><input id="msgid"
+        value="msg-demo-0001"></div>
+    </div>
+    <label>收件人（逗号或换行分隔，按域/身份套用策略）</label>
+    <textarea id="rcpts">bob@corp.example, carol@eng.corp.example, dave@partner.example</textarea>
+    <label>正文</label>
+    <textarea id="body">季度营收预测：下季度预计增长 18%。仅限收件人阅读。</textarea>
+    <button class="btn" onclick="precheck(false)">▶ 发送预检（冻结快照）</button>
+    <button class="btn secondary" onclick="precheck(true)">↻ 显式重新预检（作废旧快照）</button>
+  </div>
+
+  <div id="precheck-out"></div>
+
+  <div class="card hidden" id="send-card">
+    <h2>按已冻结快照投递</h2>
+    <div id="ack-area"></div>
+    <div class="muted" style="margin:8px 0">
+      发送阶段只读取快照指纹并做撤销闸门检查；目录变化（轮换/撤销/通讯录更新）
+      不会替换快照中的密钥，只会在发现撤销/到期时<b>失败关闭</b>。
+    </div>
+    <button class="btn" id="sendbtn" onclick="sendMail()">🔒 加密并投递</button>
+    <button class="btn secondary" onclick="armFail()">💥 模拟下一次投递失败（验证重试）</button>
+  </div>
+
+  <div class="card hidden" id="result-card"></div>
+</section>
+
+<!-- ============================ 通讯录 ============================ -->
+<section class="tab" id="tab-dir">
+  <div class="card">
+    <h2>新建收件人（生成密钥并签发证书）</h2>
+    <div class="row">
+      <div><label>邮箱</label><input id="prov-email" placeholder="erin@corp.example"></div>
+      <div><label>证书有效期（天）</label><input id="prov-days" type="number"
+        value="365"></div>
+    </div>
+    <button class="btn" onclick="provision()">签发并写入通讯录</button>
+  </div>
+  <div class="card">
+    <h2>轮换 / 撤销 / 移除</h2>
+    <div class="row">
+      <div><label>轮换地址</label><input id="rot-email">
+        <button class="btn secondary" onclick="rotate()">轮换证书（旧证留历史）</button></div>
+      <div><label>撤销指纹</label><input id="rev-fp" placeholder="sha256 指纹">
+        <button class="btn danger" onclick="revoke()">撤销证书</button></div>
+      <div><label>从通讯录移除</label><input id="rm-email">
+        <button class="btn danger" onclick="removeEntry()">移除地址</button></div>
+    </div>
+  </div>
+  <div class="card">
+    <h2>目录时钟（演示"按时间点解析"与到期）</h2>
+    <div class="muted" style="margin-bottom:8px">
+      网关使用逻辑时钟做证书有效期判定与快照时间点。可拨到未来/过去，
+      随后执行预检即可观察 expired / not_yet_valid；系统时钟恢复点一键还原。
+    </div>
+    <div class="row">
+      <div><label>设置 epoch（留空=系统时钟）</label><input id="clock-epoch"
+        placeholder="1798000000"></div>
+    </div>
+    <button class="btn secondary" onclick="setClock()">设置时钟</button>
+    <button class="btn secondary" onclick="resetClock()">恢复系统时钟</button>
+  </div>
+  <div class="card">
+    <h2>当前通讯录 <button class="btn secondary" style="margin:0 0 0 8px"
+      onclick="loadDir()">刷新</button></h2>
+    <div id="dir-table"></div>
+  </div>
+</section>
+
+<!-- ============================ 策略 ============================ -->
+<section class="tab" id="tab-pol">
+  <div class="card">
+    <h2>缺省策略</h2>
+    <div class="row">
+      <div><label>无任何覆盖时的默认模式</label>
+        <select id="def-mode">
+          <option value="enforce">enforce 强制加密（缺密钥即阻断）</option>
+          <option value="opportunistic">opportunistic 机会性（可显式确认明文）</option>
+        </select></div>
+    </div>
+    <button class="btn" onclick="setDefault()">保存缺省策略</button>
+  </div>
+  <div class="card">
+    <h2>域 / 身份覆盖（身份优先于域）</h2>
+    <div class="row">
+      <div><label>范围类型</label><select id="pol-type">
+        <option value="domain">domain 域</option>
+        <option value="identity">identity 具体身份</option></select></div>
+      <div><label>范围（域或邮箱）</label><input id="pol-scope"
+        placeholder="partner.example 或 vip@corp.example"></div>
+      <div><label>模式</label><select id="pol-mode">
+        <option value="enforce">enforce</option>
+        <option value="opportunistic">opportunistic</option></select></div>
+    </div>
+    <button class="btn" onclick="setPolicy()">保存覆盖</button>
+    <div style="margin-top:16px" id="pol-table"></div>
+  </div>
+</section>
+
+<!-- ============================ 清单 ============================ -->
+<section class="tab" id="tab-man">
+  <div class="card">
+    <h2>验证投递清单</h2>
+    <label>清单 ID 或邮件 ID</label>
+    <div class="row">
+      <div><input id="man-id" placeholder="man_xxx 或 msg-demo-0001"></div>
+    </div>
+    <button class="btn" onclick="verifyManifest()">验证签名与绑定</button>
+    <button class="btn secondary" onclick="loadManifest()">仅查看清单</button>
+    <button class="btn secondary" onclick="lateRevoke()">模拟发送后迟到撤销（只追加事件）</button>
+    <label>收件人解密演示（收件人地址）</label>
+    <div class="row"><div><input id="dec-addr" placeholder="bob@corp.example"></div></div>
+    <button class="btn secondary" onclick="decrypt()">用私钥库解密该收件人邮件</button>
+  </div>
+  <div id="man-out"></div>
+</section>
+
+</main>
+<div class="toast" id="toast"></div>
+
+<script>
+let CURRENT = null;  // 当前预检结果
+
+function toast(msg, ok=true) {
+  const t = document.getElementById('toast');
+  const d = document.createElement('div');
+  d.className = ok ? 's' : 'e';
+  d.textContent = msg;
+  t.appendChild(d);
+  setTimeout(() => d.remove(), 4000);
+}
+
+async function api(method, path, body) {
+  const opt = {method, headers: {'Content-Type':'application/json'}};
+  if (body !== undefined) opt.body = JSON.stringify(body);
+  const r = await fetch(path, opt);
+  const data = await r.json().catch(() => ({}));
+  if (!r.ok) throw Object.assign(new Error(data.message||('HTTP '+r.status)),
+    {data, status:r.status});
+  return data;
+}
+
+function esc(s) {
+  return String(s??'').replace(/[&<>"]/g, c =>
+    ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c]));
+}
+function fpShort(fp) { return fp ? esc(fp.slice(0,23))+'…' : '—'; }
+
+function pill(text, cls) { return `<span class="pill ${cls}">${text}</span>`; }
+
+function banner(cls, title, lines) {
+  return `<div class="banner ${cls}"><b>${esc(title)}</b><ul style="margin:6px 0 0 18px">
+    ${lines.map(l=>`<li>${l}</li>`).join('')}</ul></div>`;
+}
+
+// ---- 时钟 -------------------------------------------------------------
+async function refreshClock() {
+  const info = await api('GET','/api/info');
+  const d = new Date(info.clock.now*1000);
+  document.getElementById('clock').innerHTML =
+    `逻辑时钟：<b>${d.toISOString().replace('T',' ').slice(0,19)} UTC</b>`+
+    (info.clock.mode==='override'?' <span class="pill warn">覆盖</span>':'')+
+    `<br>网关密钥指纹：<span class="mono">${info.gateway_public_key_sha256.slice(0,20)}…</span>`;
+  return info;
+}
+async function setClock() {
+  const v = document.getElementById('clock-epoch').value.trim();
+  await api('POST','/api/clock',{epoch: v? Number(v): null});
+  toast('时钟已设置'); refreshClock();
+}
+async function resetClock() {
+  await api('POST','/api/clock',{epoch: null});
+  document.getElementById('clock-epoch').value='';
+  toast('已恢复系统时钟'); refreshClock();
+}
+
+// ---- 预检 -------------------------------------------------------------
+function statusPill(r) {
+  if (r.status==='keyed') return pill('可信密钥', 'ok');
+  if (r.status==='revoked') return pill('已撤销', 'err');
+  if (r.status==='expired') return pill('已到期', 'err');
+  if (r.status==='not_yet_valid') return pill('未生效', 'warn');
+  return pill('无密钥/无目录项', 'err');
+}
+
+async function precheck(renew) {
+  const recipients = document.getElementById('rcpts').value
+    .split(/[,\n]/).map(s=>s.trim()).filter(Boolean);
+  try {
+    const res = await api('POST','/api/precheck', {
+      message_id: document.getElementById('msgid').value.trim(),
+      sender: document.getElementById('sender').value.trim(),
+      recipients, renew
+    });
+    CURRENT = res;
+    renderPrecheck(res);
+  } catch (e) {
+    document.getElementById('precheck-out').innerHTML = banner('err',
+      '预检被拒绝', [esc(e.message) +
+      (e.data?.details?.existing_snapshot_id
+        ? `<br><span class="mono">已有快照：${esc(e.data.details.existing_snapshot_id)}</span>`:'')]);
+    document.getElementById('send-card').classList.add('hidden');
+  }
+}
+
+function renderPrecheck(res) {
+  document.getElementById('s2').classList.add('done');
+  let html = `<div class="card"><h2>预检结果 — 密钥快照已冻结</h2>`;
+  if (res.deliverable && !res.optional_missing.length)
+    html += banner('ok', '可以投递：全部收件人都有可信密钥', []);
+  else if (res.deliverable)
+    html += banner('warn', '可以投递，但存在机会性收件人无密钥，必须显式确认明文',
+      res.optional_missing.map(m=>
+        `<b>${esc(m.address)}</b>（${esc(m.status)}，策略来自 ${esc(m.policy_source)}）`));
+  else
+    html += banner('err', '禁止投递：强制加密收件人缺少可信密钥（不会静默降级）',
+      res.required_missing.map(m=>
+        `<b>${esc(m.address)}</b> — ${esc(m.status)}，策略来自 ${esc(m.policy_source)}`));
+
+  html += `<div class="muted" style="margin:6px 0">快照 <span class="mono">${esc(res.snapshot_id)}</span>
+    · 时间点 <b>${new Date(res.point_in_time*1000).toISOString()}</b>
+    · 证书摘要 <span class="mono">${esc(res.cert_digest.slice(0,24))}…</span>
+    · 收件人集合哈希 <span class="mono">${esc(res.recipients_hash.slice(0,20))}…</span></div>
+    <table><thead><tr><th>收件人</th><th>域</th><th>策略</th><th>密钥状态</th>
+    <th>证书指纹</th><th>传输</th></tr></thead><tbody>`;
+  for (const r of res.recipients) {
+    html += `<tr><td>${esc(r.address)}</td><td>${esc(r.domain)}</td>
+      <td>${pill(r.mode==='enforce'?'enforce 强制':'opportunistic 机会',
+        r.mode==='enforce'?'info':'warn')}<br>
+      <span class="muted">${esc(r.policy_source)}</span></td>
+      <td>${statusPill(r)}</td>
+      <td class="mono">${fpShort(r.fingerprint)}</td>
+      <td>${r.transport==='e2ee'?pill('端到端加密','ok'):pill('明文（需确认）','warn')}</td></tr>`;
+  }
+  html += '</tbody></table></div>';
+  document.getElementById('precheck-out').innerHTML = html;
+
+  // 发送卡
+  document.getElementById('send-card').classList.remove('hidden');
+  document.getElementById('result-card').classList.add('hidden');
+  const ack = document.getElementById('ack-area');
+  if (res.optional_missing.length) {
+    ack.innerHTML = '<label>下列机会性收件人无密钥，勾选即表示你显式承担明文投递责任：</label>' +
+      res.optional_missing.map(m=>
+        `<div class="ackbox"><input type="checkbox" class="ack" value="${esc(m.address)}">
+        <span>${esc(m.address)} — ${esc(m.status)}</span></div>`).join('');
+  } else ack.innerHTML = '';
+}
+
+async function armFail() {
+  if (!CURRENT) return;
+  const addr = prompt('对哪个收件人注入一次投递失败？',
+    CURRENT.recipients[0]?.address || '');
+  if (!addr) return;
+  await api('POST','/api/simulate/fail-next',{recipient: addr});
+  toast('已布防：下一次发送时 '+addr+' 将失败一次（随后可用同快照重试）');
+}
+
+async function sendMail() {
+  if (!CURRENT) return;
+  const ack = [...document.querySelectorAll('.ack:checked')].map(c=>c.value);
+  const btn = document.getElementById('sendbtn');
+  btn.disabled = true;
+  try {
+    const res = await api('POST',
+      `/api/snapshots/${CURRENT.snapshot_id}/send`, {
+      body: document.getElementById('body').value,
+      plaintext_ack: ack
+    });
+    document.getElementById('s3').classList.add('done');
+    CURRENT.manifest_id = res.manifest_id;
+    document.getElementById('man-id').value = res.manifest_id;
+    renderSent(res);
+    toast('投递成功，清单已封签');
+  } catch (e) {
+    if (e.status===502) {
+      document.getElementById('result-card').classList.remove('hidden');
+      document.getElementById('result-card').innerHTML = banner('warn',
+        '投递未完成（瞬时失败）', [esc(e.message),
+        `失败收件人：<b>${esc((e.data.failed||[]).join(', '))}</b>`,
+        '快照仍为 prepared，再次点击"加密并投递"将以<b>同一快照、同一 CEK</b> 幂等重试。']);
+    } else {
+      document.getElementById('result-card').classList.remove('hidden');
+      document.getElementById('result-card').innerHTML = banner('err',
+        '发送被闸门拒绝（失败关闭，未投递）', [esc(e.message)]);
+    }
+  } finally { btn.disabled = false; }
+}
+
+function renderSent(res) {
+  let html = `<h2>投递完成 — 可验证清单</h2>`;
+  html += banner('ok', '邮件已按快照加密投递，清单已由网关身份密钥签名', [
+    `清单 <span class="mono">${esc(res.manifest_id)}</span>`,
+    `信封 <span class="mono">${esc(res.envelope_id)}</span> · 封签时刻 ${new Date(res.sealed_at*1000).toISOString()}`,
+    `清单哈希 <span class="mono">${esc(res.sha256)}</span>`]);
+  html += `<table><thead><tr><th>收件人</th><th>传输</th><th>指纹</th></tr></thead><tbody>`;
+  for (const r of res.recipients)
+    html += `<tr><td>${esc(r.address)}</td><td>${
+      r.transport==='e2ee'?pill('端到端加密','ok'):pill('明文（已确认）','warn')}</td>
+      <td class="mono">${fpShort(r.fingerprint)}</td></tr>`;
+  html += '</tbody></table>';
+  if (res.idempotent_retry)
+    html += banner('info','这是幂等重试返回','未产生第二次投递，返回既有清单。');
+  document.getElementById('result-card').innerHTML = html;
+  document.getElementById('result-card').classList.remove('hidden');
+}
+
+// ---- 通讯录管理 --------------------------------------------------------
+async function loadDir() {
+  const d = await api('GET','/api/directory');
+  let html = `<table><thead><tr><th>地址</th><th>版本</th><th>指纹</th>
+    <th>有效期</th><th>状态</th></tr></thead><tbody>`;
+  for (const e of d.entries) {
+    const exp = e.na_epoch*1000 < Date.now();
+    html += `<tr><td>${esc(e.email)}</td><td>v${e.issued_seq}</td>
+      <td class="mono">${fpShort(e.fingerprint)}</td>
+      <td>${new Date(e.nb_epoch*1000).toISOString().slice(0,10)} →
+      ${new Date(e.na_epoch*1000).toISOString().slice(0,10)}</td>
+      <td>${e.revoked?pill('已撤销','err'):exp?pill('已到期','warn'):
+        pill('有效','ok')}</td></tr>`;
+  }
+  html += '</tbody></table>';
+  document.getElementById('dir-table').innerHTML = html;
+}
+async function provision() {
+  await api('POST','/api/directory/provision',{
+    email: document.getElementById('prov-email').value.trim(),
+    days: Number(document.getElementById('prov-days').value||365)});
+  toast('已签发'); loadDir();
+}
+async function rotate() {
+  const d = await api('POST','/api/directory/rotate',
+    {email: document.getElementById('rot-email').value.trim()});
+  toast('已轮换，新指纹 '+d.fingerprint.slice(0,20)+'…（旧证保留）'); loadDir();
+}
+async function revoke() {
+  await api('POST','/api/certs/revoke',
+    {fingerprint: document.getElementById('rev-fp').value.trim()});
+  toast('已撤销并从通讯录摘除'); loadDir();
+}
+async function removeEntry() {
+  await api('DELETE','/api/directory/'+
+    encodeURIComponent(document.getElementById('rm-email').value.trim()));
+  toast('已从通讯录移除'); loadDir();
+}
+
+// ---- 策略 --------------------------------------------------------------
+async function loadPolicies() {
+  const p = await api('GET','/api/policies');
+  document.getElementById('def-mode').value = p.default_mode;
+  let html = `<table><thead><tr><th>范围类型</th><th>范围</th><th>模式</th>
+    <th></th></tr></thead><tbody>`;
+  for (const o of p.overrides)
+    html += `<tr><td>${esc(o.scope_type)}</td><td>${esc(o.scope)}</td>
+      <td>${pill(o.mode, o.mode==='enforce'?'info':'warn')}</td>
+      <td><button class="btn danger" style="margin:0"
+        onclick="delPolicy('${esc(o.scope_type)}','${esc(o.scope)}')">删除</button></td></tr>`;
+  html += '</tbody></table>';
+  document.getElementById('pol-table').innerHTML = html;
+}
+async function setDefault() {
+  await api('PUT','/api/policies/default',
+    {mode: document.getElementById('def-mode').value});
+  toast('缺省策略已保存'); loadPolicies();
+}
+async function setPolicy() {
+  await api('PUT','/api/policies', {
+    scope_type: document.getElementById('pol-type').value,
+    scope: document.getElementById('pol-scope').value.trim(),
+    mode: document.getElementById('pol-mode').value});
+  toast('覆盖已保存'); loadPolicies();
+}
+async function delPolicy(t, s) {
+  await api('DELETE','/api/policies',{scope_type:t, scope:s});
+  loadPolicies();
+}
+
+// ---- 清单 --------------------------------------------------------------
+async function resolveManifest(id) {
+  if (id.startsWith('man_')) return await api('GET','/api/manifests/'+id);
+  return await api('GET','/api/messages/'+encodeURIComponent(id)+'/manifest');
+}
+async function loadManifest() {
+  const id = document.getElementById('man-id').value.trim();
+  try {
+    const m = await resolveManifest(id);
+    document.getElementById('man-out').innerHTML =
+      `<div class="card"><h2>清单 <span class="mono">${esc(m.manifest_id)}</span></h2>
+      <pre class="json">${esc(JSON.stringify(m,null,2))}</pre></div>`;
+  } catch(e){ toast(e.message,false); }
+}
+async function verifyManifest() {
+  const id = document.getElementById('man-id').value.trim();
+  let m;
+  try { m = await resolveManifest(id); } catch(e){ toast(e.message,false); return; }
+  const v = await api('GET','/api/manifests/'+m.manifest_id+'/verify');
+  document.getElementById('s4').classList.add('done');
+  let html = `<div class="card"><h2>验证结果</h2>
+    ${v.valid?banner('ok','清单签名与全部绑定校验通过',[]):
+      banner('err','校验失败',[])}
+    <table><thead><tr><th>检查项</th><th>结果</th><th>细节</th></tr></thead><tbody>`;
+  for (const c of v.checks)
+    html += `<tr><td class="mono">${esc(c.check)}</td>
+      <td>${c.pass?pill('PASS','ok'):pill('FAIL','err')}</td>
+      <td class="mono">${esc(c.expected?'expected '+c.expected.slice(0,24)+
+        ' / actual '+c.actual.slice(0,24):
+        (c.mismatches?.length?('mismatch: '+esc(c.mismatches.join(','))):''))}</td></tr>`;
+  html += '</tbody></table>';
+  if (v.late_events.length)
+    html += banner('warn', '签名之后追加的迟到事件（不改变已签名事实）',
+      v.late_events.map(ev=>`${new Date(ev.at*1000).toISOString()}
+        <b>${esc(ev.kind)}</b> <span class="mono">${esc(JSON.stringify(ev.detail))}</span>`));
+  html += `<div class="muted">验签公钥指纹：<span class="mono">
+    ${esc(v.gateway_public_key_sha256)}</span></div></div>`;
+  document.getElementById('man-out').innerHTML = html;
+}
+async function lateRevoke() {
+  const id = document.getElementById('man-id').value.trim();
+  let m; try { m = await resolveManifest(id); } catch(e){ toast(e.message,false); return; }
+  const r = m.document.recipients.find(x=>x.transport==='e2ee');
+  if (!r) return toast('没有 e2ee 收件人', false);
+  // 通过目录管理接口真实撤销该指纹（迟到发现），再把事件附加到已发清单
+  try {
+    await api('POST','/api/certs/revoke',{fingerprint:r.fingerprint,
+      reason:'late discovered compromise'});
+  } catch(e) { /* 可能已撤销 */ }
+  const ev = await api('POST','/api/manifests/'+m.manifest_id+'/events',{
+    kind:'late_revocation',
+    detail:{address:r.address, fingerprint:r.fingerprint,
+      note:'发送后才发现；已投递事实不可改变，仅记录告警'}});
+  toast('已撤销并追加迟到事件；重新验证可看到事件，签名仍有效');
+}
+async function decrypt() {
+  const id = document.getElementById('man-id').value.trim();
+  const addr = document.getElementById('dec-addr').value.trim();
+  let m; try { m = await resolveManifest(id); } catch(e){ toast(e.message,false); return; }
+  try {
+    const r = await api('POST','/api/manifests/'+m.manifest_id+'/decrypt',
+      {address: addr});
+    document.getElementById('man-out').innerHTML =
+      `<div class="card"><h2>收件人 ${esc(addr)} 解密结果</h2>
+      ${r.transport==='e2ee'?
+        `<div class="muted">用私钥解封 CEK 后经 HMAC 校验得到正文：</div>
+         <pre class="json">${esc(r.plaintext)}</pre>`:
+        banner('info','该收件人为明文投递',[esc(r.note||'')])}</div>`;
+  } catch(e){ toast(e.message,false); }
+}
+
+// ---- tab 切换 ----------------------------------------------------------
+document.querySelectorAll('nav button').forEach(b=>b.onclick=()=>{
+  document.querySelectorAll('nav button').forEach(x=>x.classList.remove('active'));
+  document.querySelectorAll('.tab').forEach(x=>x.classList.remove('active'));
+  b.classList.add('active');
+  document.getElementById('tab-'+b.dataset.tab).classList.add('active');
+  if (b.dataset.tab==='dir') loadDir();
+  if (b.dataset.tab==='pol') loadPolicies();
+});
+
+refreshClock();
+setInterval(refreshClock, 10000);
+</script>
+</body>
+</html>
